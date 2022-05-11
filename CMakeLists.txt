@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION "3.16")
 project(clpe)
 
-find_package(ament_cmake REQUIRED)
+find_package(catkin REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_search_module(gstreamer_app gstreamer-app-1.0 REQUIRED IMPORTED_TARGET)
 
@@ -17,5 +17,4 @@ target_link_libraries(${PROJECT_NAME} PUBLIC PkgConfig::gstreamer_app)
 install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include/${PROJECT_NAME})
 
-ament_export_targets(HAS_LIBRARY_TARGET ${PROJECT_NAME})
-ament_package(CONFIG_EXTRAS cmake/extra_dependencies.cmake)
+catkin_package(CFG_EXTRAS extra_dependencies.cmake)
