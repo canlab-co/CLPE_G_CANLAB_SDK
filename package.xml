@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format2.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>clpe</name>
+  <version>0.1.0</version>
+  <description>clpe sdk</description>
+  <license>Apache License 2.0</license>
+  <author>Can-lab Corporation</author>
+  <maintainer email="dwsun@can-lab.co.kr">Dongwoo Sun</maintainer>
+  <maintainer email="rlatae123@can-lab.co.kr">Taejung Kim</maintainer>
+
+  <depend>sudo</depend>
+  <depend>iputils-ping</depend>
+  <depend>network-manager</depend>
+  <depend>net-tools</depend>
+  <depend>procps</depend>
+  <depend>kmod</depend>
+  <depend>libgstreamer-plugins-base1.0-0</depend>
+
+  <build_depend>libgstreamer-plugins-base1.0-dev</build_depend>
+  <build_depend>pkgconf</build_depend>
+  <build_depend>ament_cmake</build_depend>
+  <buildtool_depend>python3-colcon-common-extensions</buildtool_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
