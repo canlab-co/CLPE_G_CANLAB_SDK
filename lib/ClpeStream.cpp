@@ -1,4 +1,5 @@
 #include "ClpeStream.h"
+#include <math.h>
 
 int process_block_done(PortData* data);
 void intecept_frame(int camera_id, unsigned int cur_frame_seq, unsigned char* p_buffer, unsigned int size, struct timeval *pt_camera_timeStamp);
@@ -37,8 +38,16 @@ unsigned int g_cur_cam_id = 0;
 unsigned int g_last_frame_seq = 0;
 unsigned int g_cur_frame_seq = 0;
 
-t_frame_info gt_frame_info[AVAILALE_PORT] = {0,};    // master & slave
+// FOR JPEG
+int format = 1;
+typedef struct jpeg_frame_info{
+	unsigned int frame_seq;
+	struct timeval jpeg_timeStamp;
+}t_jpeg_frame_info;
 
+
+t_frame_info gt_frame_info[AVAILALE_PORT] = {0,};    // master & slave
+t_jpeg_frame_info gt_jpeg_frame_info[AVAILALE_PORT] = {0, };
 
 pthread_t g_pthread;
 
@@ -122,7 +131,7 @@ int process_block_done(PortData* data)
 #endif // #ifdef CANLAB_LOGGING_ENABLE
 
 		// Send To SRC
-		if(data->play) {
+		if(data->play) {		
 			GstBuffer* buffer;
 			GstMapInfo map;
 
@@ -136,6 +145,7 @@ int process_block_done(PortData* data)
 
 			GST_BUFFER_PTS(buffer) = GST_TIMEVAL_TO_TIME(tv_frame_pts);
 			gst_app_src_push_buffer (GST_APP_SRC (data->up_appsrc), buffer);
+			
 		}
 	} else {
 		// Old Discard : Not Completed
@@ -151,7 +161,42 @@ int process_block_done(PortData* data)
 static GstFlowReturn
 on_new_sample_from_sink (GstElement* elt, PortData* data)
 {
+ if(format == 0){
+	gettimeofday(&gt_jpeg_frame_info[data->idx].jpeg_timeStamp, NULL);
+
 	GstSample *sample;
+	GstBuffer *app_buffer, *buffer;
+	GstFlowReturn ret = GST_FLOW_OK;
+	GstMapInfo map;
+      
+        // get the sample from appsink 
+	sample = gst_app_sink_pull_sample (GST_APP_SINK (elt));
+	buffer = gst_sample_get_buffer (sample);	  	
+
+        // make a copy
+	app_buffer = gst_buffer_copy_deep (buffer);
+		  
+	gst_buffer_map (app_buffer, &map, GST_MAP_WRITE);
+	
+	data->cb_app(data->idx, (unsigned char *)map.data, (unsigned int)map.size, &gt_jpeg_frame_info[data->idx].jpeg_timeStamp);	
+	intecept_frame(data->idx, gt_jpeg_frame_info[data->idx].frame_seq, (unsigned char *)map.data, (unsigned int)map.size, &gt_jpeg_frame_info[data->idx].jpeg_timeStamp);
+	
+	//get source an push new buffer 
+	if(data->play){	
+		gst_app_src_push_buffer (GST_APP_SRC (data->up_appsrc), app_buffer);
+	}else{
+		//nothing to do
+	}
+
+	gst_sample_unref (sample);
+
+	gst_buffer_unmap (buffer, &map);
+
+	gt_jpeg_frame_info[data->idx].frame_seq++;
+
+	return ret;
+  }else{
+  	GstSample *sample;
 	GstBuffer *buffer;
 	GstFlowReturn ret = GST_FLOW_OK;
 	gsize			recv_len;
@@ -279,6 +324,7 @@ on_new_sample_from_sink (GstElement* elt, PortData* data)
 	gst_sample_unref (sample);
 
 	return ret;
+  }
 }
 
 gboolean on_sink_message_appsink (GstBus * bus, GstMessage * message, PortData* data)
@@ -362,6 +408,17 @@ int launch_port(PortData* data)
 
 	/* ========================================= SINK ========================================= */
 	snprintf(name_app, sizeof(name_app), "app_%u", data->idx);
+	if(format == 0){
+	snprintf(buff, sizeof(buff),
+			"udpsrc address=%s port=%u retrieve-sender-address=false buffer-size=%u "
+			" ! application/x-rtp, encoding-name=JPEG, payload=26 "
+			" ! queue max-size-time=5000000000 max-size-buffers=5000000000 max-size-bytes=5000000000 " 
+			" ! rtpjpegdepay ! appsink name=%s ",
+			ip_address, port,
+			UDP_GST_MAX_BUFFER_SIZE,
+			name_app
+			);
+	}else{
 	snprintf(buff, sizeof(buff),
 			"udpsrc address=%s port=%u retrieve-sender-address=false buffer-size=%u " 
 			" ! queue max-size-time=2000000000 max-size-buffers=2000000000 max-size-bytes=2000000000 " 
@@ -370,6 +427,7 @@ int launch_port(PortData* data)
 			UDP_GST_MAX_BUFFER_SIZE,
 			name_app
 			);
+	}
 
 	data->appsink = gst_parse_launch (buff, NULL);
 	if (data->appsink == NULL) {
@@ -392,28 +450,51 @@ int launch_port(PortData* data)
 	snprintf(name_appsrc, sizeof(name_appsrc), "appsrc_%u", data->idx);
 
 	if(data->play) { // play = ON
-		if(g_MainData.ui32_use_camera_cnt > 4)
+		if(format == 0)
 		{
-			snprintf(buff, sizeof(buff), "appsrc name=%s stream-type=\"stream\" is-live=1 do-timestamp=0 format=time "
-					" caps=\"video/x-raw,format=UYVY,width=%d,height=%d,pixel-aspect-ratio=1/1,interlace-mode=progressive,framerate=30/1\" "
-					" ! queue max-size-time=2000000000 max-size-buffers=2000000000 max-size-bytes=2000000000 " 
-					"! videoscale method=0 n-thread=9 ! video/x-raw, width=480, height=270 "
-					"! videoconvert ! ximagesink sync=false async=false",
-					name_appsrc,
-					image_width,
-					image_height
-					);			
-		}
+			if(g_MainData.ui32_use_camera_cnt > 4)
+			{
+				snprintf(buff, sizeof(buff), "appsrc name=%s stream-type=\"stream\" is-live=1 do-timestamp=0 format=time "
+						" ! queue max-size-time=2000000000 max-size-buffers=2000000000 max-size-bytes=2000000000 " 
+						" ! jpegparse ! jpegdec ! videoscale method=0 n-threads=9 ! video/x-raw, width=480, height=270 "
+						" ! xvimagesink sync=false async=false",
+						name_appsrc
+						);			
+			}
+			else
+			{
+				snprintf(buff, sizeof(buff), "appsrc name=%s stream-type=\"stream\" is-live=1 do-timestamp=0 format=time "
+						" ! queue max-size-time=2000000000 max-size-buffers=2000000000 max-size-bytes=2000000000 " 
+						" ! jpegparse ! jpegdec ! videoconvert ! xvimagesink sync=false async=false",
+						name_appsrc
+						);
+			}
+		}	
 		else
 		{
-			snprintf(buff, sizeof(buff), "appsrc name=%s stream-type=\"stream\" is-live=1 do-timestamp=0 format=time "
-					" caps=\"video/x-raw,format=UYVY,width=%d,height=%d,pixel-aspect-ratio=1/1,interlace-mode=progressive,framerate=30/1\" "
-					" ! queue max-size-time=2000000000 max-size-buffers=2000000000 max-size-bytes=2000000000 " 
-					" ! videoconvert ! ximagesink sync=false async=false",
-					name_appsrc,
-					image_width,
-					image_height
-					);
+			if(g_MainData.ui32_use_camera_cnt > 4)
+			{
+				snprintf(buff, sizeof(buff), "appsrc name=%s stream-type=\"stream\" is-live=1 do-timestamp=0 format=time "
+						" caps=\"video/x-raw,format=UYVY,width=%d,height=%d,pixel-aspect-ratio=1/1,interlace-mode=progressive,framerate=30/1\" "
+						" ! queue max-size-time=2000000000 max-size-buffers=2000000000 max-size-bytes=2000000000 " 
+						" ! videoscale method=0 n-threads=9 ! video/x-raw, width=480, height=270 "
+						" ! videoconvert ! xvimagesink sync=false async=false",
+						name_appsrc,
+						image_width,
+						image_height
+						);			
+			}
+			else
+			{
+				snprintf(buff, sizeof(buff), "appsrc name=%s stream-type=\"stream\" is-live=1 do-timestamp=0 format=time "
+						" caps=\"video/x-raw,format=UYVY,width=%d,height=%d,pixel-aspect-ratio=1/1,interlace-mode=progressive,framerate=30/1\" "
+						" ! queue max-size-time=2000000000 max-size-buffers=2000000000 max-size-bytes=2000000000 " 
+						" ! videoconvert ! xvimagesink sync=false async=false",
+						name_appsrc,
+						image_width,
+						image_height
+						);
+			}
 		}
 	} 
 
@@ -431,7 +512,6 @@ int launch_port(PortData* data)
 
 		data->up_appsrc = gst_bin_get_by_name (GST_BIN(data->appsrc), name_appsrc);
 		g_object_set (data->up_appsrc, "format", GST_FORMAT_TIME, NULL);
-
 	}
 
 	return TRUE;
@@ -557,17 +637,41 @@ void *clpe_runStream(void *pArg)
 
 void intecept_frame(int camera_id, unsigned int cur_frame_seq, unsigned char* p_buffer, unsigned int size, struct timeval *pt_camera_timeStamp)
 {
-    gt_frame_info[camera_id].camera_id = camera_id;
-    gt_frame_info[camera_id].p_buffer = p_buffer;
-    gt_frame_info[camera_id].size = size;
-    gt_frame_info[camera_id].pt_camera_timeStamp = *pt_camera_timeStamp;
-    gt_frame_info[camera_id].current_frame_seq = cur_frame_seq;
+    if(format == 0)
+    {
+    	
+	    gt_frame_info[camera_id].camera_id = camera_id;
+	    gt_frame_info[camera_id].p_buffer = p_buffer;
+	    gt_frame_info[camera_id].size = size;
+	    gt_frame_info[camera_id].pt_camera_timeStamp = *pt_camera_timeStamp;
+	    gt_frame_info[camera_id].current_frame_seq = cur_frame_seq;
+	    
+	    g_cur_cam_id = camera_id;
+	    g_cur_frame_seq = cur_frame_seq;
+	    	  
+	    
+    }
+    else
+    {
+	    gt_frame_info[camera_id].camera_id = camera_id;
+	    gt_frame_info[camera_id].p_buffer = p_buffer;
+	    gt_frame_info[camera_id].size = size;
+	    gt_frame_info[camera_id].pt_camera_timeStamp = *pt_camera_timeStamp;
+	    gt_frame_info[camera_id].current_frame_seq = cur_frame_seq;
 
-    g_cur_cam_id = camera_id;
-    g_cur_frame_seq = cur_frame_seq;
+	    g_cur_cam_id = camera_id;
+	    g_cur_frame_seq = cur_frame_seq;
+    }   
+
 }
 
-int clpe_startStream(T_CB_APP cb_app, char use_cam_0, char use_cam_1, char use_cam_2, char use_cam_3, int display_on)
+void clpe_setFormat(int getformat)
+{
+    if(getformat == 0) format = 0;
+    else format = 1;
+}
+
+int clpe_startStream(T_CB_APP cb_app, char use_cam_0, char use_cam_1, char use_cam_2, char use_cam_3, char use_cam_4, char use_cam_5, char use_cam_6, char use_cam_7, int display_on)
 {
 //    pthread_t p_thread;
     int thread_id;
@@ -577,10 +681,14 @@ int clpe_startStream(T_CB_APP cb_app, char use_cam_0, char use_cam_1, char use_c
     pt_func_arg = (t_function_arg *)malloc(sizeof(t_function_arg));
     pt_func_arg->callback_func = cb_app;
     pt_func_arg->display_on = display_on;
-    pt_func_arg->use_cam[0] = use_cam_0;
-    pt_func_arg->use_cam[1] = use_cam_1;
-    pt_func_arg->use_cam[2] = use_cam_2;
-    pt_func_arg->use_cam[3] = use_cam_3;
+	pt_func_arg->use_cam[0] = use_cam_0;
+	pt_func_arg->use_cam[1] = use_cam_1;
+	pt_func_arg->use_cam[2] = use_cam_2;
+	pt_func_arg->use_cam[3] = use_cam_3;
+	pt_func_arg->use_cam[4] = use_cam_4;
+	pt_func_arg->use_cam[5] = use_cam_5;
+	pt_func_arg->use_cam[6] = use_cam_6;
+	pt_func_arg->use_cam[7] = use_cam_7;
 
     thread_id = pthread_create(&g_pthread, NULL, clpe_runStream, (void *)(pt_func_arg));
 

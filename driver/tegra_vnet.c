@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2020, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -11,11 +11,16 @@
  * more details.
  */
 
+#include <linux/aer.h>
 #include <linux/etherdevice.h>
 #include <linux/module.h>
 #include <linux/netdevice.h>
 #include <linux/pci.h>
 #include "tegra_vnet.h"
+
+#ifndef mmiowb
+#define mmiowb() do {} while (0)
+#endif
 
 #define PCI_DEVICE_ID_NVIDIA_JETSON_AGX_NETWORK 0x2296
 
@@ -39,6 +44,10 @@ struct tvnet_priv {
 	enum dir_link_state tx_link_state;
 	enum dir_link_state rx_link_state;
 	enum os_link_state os_link_state;
+
+	/* Flag to track ndo_stop done by suspend */
+	bool pm_closed;
+
 	/* To synchronize network link state machine*/
 	struct mutex link_state_lock;
 	wait_queue_head_t link_state_wq;
@@ -174,7 +183,7 @@ static void tvnet_host_alloc_empty_buffers(struct tvnet_priv *tvnet)
 			break;
 		}
 
-		ep2h_empty_ptr = kmalloc(sizeof(*ep2h_empty_ptr), GFP_KERNEL);
+		ep2h_empty_ptr = kmalloc(sizeof(*ep2h_empty_ptr), GFP_ATOMIC);
 		if (!ep2h_empty_ptr) {
 			dma_unmap_single(d, iova, len, DMA_FROM_DEVICE);
 			dev_kfree_skb_any(skb);
@@ -225,8 +234,8 @@ static void tvnet_host_stop_tx_queue(struct tvnet_priv *tvnet)
 
 	netif_stop_queue(ndev);
 	/* Get tx lock to make sure that there is no ongoing xmit */
-	netif_tx_lock_bh(ndev);
-	netif_tx_unlock_bh(ndev);
+	netif_tx_lock(ndev);
+	netif_tx_unlock(ndev);
 }
 
 static void tvnet_host_stop_rx_work(struct tvnet_priv *tvnet)
@@ -457,7 +466,7 @@ static netdev_tx_t tvnet_host_start_xmit(struct sk_buff *skb,
 	rd_idx = tvnet_ivc_get_rd_cnt(&tvnet->h2ep_empty) %
 				RING_COUNT;
 	dst_iova = h2ep_empty_msg[rd_idx].u.empty_buffer.pcie_address;
-	dst_virt = tvnet->mmio_base + (dst_iova - tvnet->bar_md->bar0_base_phy);
+	dst_virt = (__force void *)tvnet->mmio_base + (dst_iova - tvnet->bar_md->bar0_base_phy);
 	/* Advance read count after all failure cases complated, to avoid
 	 * dangling buffer at endpoint.
 	 */
@@ -490,10 +499,7 @@ static netdev_tx_t tvnet_host_start_xmit(struct sk_buff *skb,
 	mb();
 
 	timeout = jiffies + msecs_to_jiffies(1000);
-	val = dma_common_rd(tvnet->dma_base, DMA_READ_DOORBELL_OFF);
-	val &= ~RD_DOORBELL_NUM_MASK;
-	val |= DMA_RD_DATA_CH << RD_DOORBELL_NUM_SHIFT;
-	dma_common_wr(tvnet->dma_base, val, DMA_READ_DOORBELL_OFF);
+	dma_common_wr(tvnet->dma_base, DMA_RD_DATA_CH, DMA_READ_DOORBELL_OFF);
 
 	desc_cnt->wr_cnt++;
 
@@ -566,27 +572,27 @@ static void tvnet_host_setup_bar0_md(struct tvnet_priv *tvnet)
 	struct ep_ring_buf *ep_mem = &tvnet->ep_mem;
 	struct host_ring_buf *host_mem = &tvnet->host_mem;
 
-	tvnet->bar_md = (struct bar_md *)tvnet->mmio_base;
+	tvnet->bar_md = (__force struct bar_md *)tvnet->mmio_base;
 
-	ep_mem->ep_cnt = (struct ep_own_cnt *)(tvnet->mmio_base +
+	ep_mem->ep_cnt = (__force struct ep_own_cnt *)(tvnet->mmio_base +
 					tvnet->bar_md->ep_own_cnt_offset);
-	ep_mem->ep2h_ctrl_msgs = (struct ctrl_msg *)(tvnet->mmio_base +
+	ep_mem->ep2h_ctrl_msgs = (__force struct ctrl_msg *)(tvnet->mmio_base +
 					tvnet->bar_md->ctrl_md.ep2h_offset);
-	ep_mem->ep2h_full_msgs = (struct data_msg *)(tvnet->mmio_base +
+	ep_mem->ep2h_full_msgs = (__force struct data_msg *)(tvnet->mmio_base +
 					tvnet->bar_md->ep2h_md.ep2h_offset);
-	ep_mem->h2ep_empty_msgs = (struct data_msg *)(tvnet->mmio_base +
+	ep_mem->h2ep_empty_msgs = (__force struct data_msg *)(tvnet->mmio_base +
 					tvnet->bar_md->h2ep_md.ep2h_offset);
 
-	host_mem->host_cnt = (struct host_own_cnt *)(tvnet->mmio_base +
+	host_mem->host_cnt = (__force struct host_own_cnt *)(tvnet->mmio_base +
 					tvnet->bar_md->host_own_cnt_offset);
-	host_mem->h2ep_ctrl_msgs = (struct ctrl_msg *)(tvnet->mmio_base +
+	host_mem->h2ep_ctrl_msgs = (__force struct ctrl_msg *)(tvnet->mmio_base +
 					tvnet->bar_md->ctrl_md.h2ep_offset);
-	host_mem->ep2h_empty_msgs = (struct data_msg *)(tvnet->mmio_base +
+	host_mem->ep2h_empty_msgs = (__force struct data_msg *)(tvnet->mmio_base +
 					tvnet->bar_md->ep2h_md.h2ep_offset);
-	host_mem->h2ep_full_msgs = (struct data_msg *)(tvnet->mmio_base +
+	host_mem->h2ep_full_msgs = (__force struct data_msg *)(tvnet->mmio_base +
 					tvnet->bar_md->h2ep_md.h2ep_offset);
 
-	tvnet->dma_desc = (struct tvnet_dma_desc *)(tvnet->mmio_base +
+	tvnet->dma_desc = (__force struct tvnet_dma_desc *)(tvnet->mmio_base +
 					tvnet->bar_md->host_dma_offset);
 
 	tvnet->h2ep_ctrl.rd = &ep_mem->ep_cnt->h2ep_ctrl_rd_cnt;
@@ -717,7 +723,6 @@ static int tvnet_host_poll(struct napi_struct *napi, int budget)
 	int work_done;
 
 	work_done = tvnet_host_process_ep2h_msg(tvnet);
-	trace_printk("work_done: %d budget: %d\n", work_done, budget);
 	if (work_done < budget) {
 		napi_complete(napi);
 		enable_irq(pci_irq_vector(tvnet->pdev, 1));
@@ -748,12 +753,15 @@ static int tvnet_host_probe(struct pci_dev *pdev,
 	tvnet = netdev_priv(ndev);
 	tvnet->ndev = ndev;
 	tvnet->pdev = pdev;
+	pci_set_drvdata(pdev, tvnet);
 
 	ret = pci_enable_device(pdev);
 	if (ret) {
 		dev_err(&pdev->dev, "pci_enable_device() failed: %d\n", ret);
 		goto free_netdev;
 	}
+
+	pci_enable_pcie_error_reporting(pdev);
 
 	/*
 	 * In CPU memory write case, skb->data buffer is copied to dst in BAR.
@@ -815,7 +823,15 @@ static int tvnet_host_probe(struct pci_dev *pdev,
 	mutex_init(&tvnet->link_state_lock);
 	init_waitqueue_head(&tvnet->link_state_wq);
 
-	ret = pci_alloc_irq_vectors(pdev, 2, 2, PCI_IRQ_MSIX);
+#if ENABLE_DMA
+	tvnet_host_write_dma_msix_settings(tvnet);
+#endif
+
+	INIT_LIST_HEAD(&tvnet->ep2h_empty_list);
+	spin_lock_init(&tvnet->ep2h_empty_lock);
+	
+	ret = pci_alloc_irq_vectors(pdev, 2, 2, PCI_IRQ_MSIX |
+				    PCI_IRQ_AFFINITY);
 	if (ret <= 0) {
 		dev_err(&pdev->dev, "pci_alloc_irq_vectors() fail: %d\n", ret);
 		ret = -EIO;
@@ -836,13 +852,6 @@ static int tvnet_host_probe(struct pci_dev *pdev,
 		goto fail_request_irq_ctrl;
 	}
 
-#if ENABLE_DMA
-	tvnet_host_write_dma_msix_settings(tvnet);
-#endif
-
-	INIT_LIST_HEAD(&tvnet->ep2h_empty_list);
-	spin_lock_init(&tvnet->ep2h_empty_lock);
-
 	return 0;
 
 fail_request_irq_ctrl:
@@ -860,6 +869,53 @@ fail:
 	return ret;
 }
 
+static void tvnet_host_remove(struct pci_dev *pdev)
+{
+	struct tvnet_priv *tvnet = pci_get_drvdata(pdev);
+
+	free_irq(pci_irq_vector(pdev, 0), tvnet->ndev);
+	free_irq(pci_irq_vector(pdev, 1), tvnet->ndev);
+	pci_free_irq_vectors(pdev);
+	unregister_netdev(tvnet->ndev);
+	netif_napi_del(&tvnet->napi);
+	pci_disable_device(pdev);
+	free_netdev(tvnet->ndev);
+}
+
+static int tvnet_host_suspend(struct pci_dev *pdev, pm_message_t state)
+{
+	struct tvnet_priv *tvnet = pci_get_drvdata(pdev);
+
+	disable_irq(pci_irq_vector(tvnet->pdev, 1));
+
+	if (tvnet->rx_link_state == DIR_LINK_STATE_UP) {
+		tvnet_host_close(tvnet->ndev);
+		tvnet->pm_closed = true;
+	}
+
+	return 0;
+}
+
+static int tvnet_host_resume(struct pci_dev *pdev)
+{
+	struct tvnet_priv *tvnet = pci_get_drvdata(pdev);
+#if ENABLE_DMA
+	struct dma_desc_cnt *desc_cnt = &tvnet->desc_cnt;
+
+	desc_cnt->wr_cnt = desc_cnt->rd_cnt = 0;
+	tvnet_host_write_dma_msix_settings(tvnet);
+#endif
+
+	if (tvnet->pm_closed == true) {
+		tvnet_host_open(tvnet->ndev);
+		tvnet->pm_closed = false;
+	}
+
+	enable_irq(pci_irq_vector(tvnet->pdev, 1));
+
+	return 0;
+}
+
 static const struct pci_device_id tvnet_host_pci_tbl[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_NVIDIA,
 		     PCI_DEVICE_ID_NVIDIA_JETSON_AGX_NETWORK) },
@@ -870,6 +926,11 @@ static struct pci_driver tvnet_pci_driver = {
 	.name		= "tvnet",
 	.id_table	= tvnet_host_pci_tbl,
 	.probe		= tvnet_host_probe,
+	.remove		= tvnet_host_remove,
+#ifdef CONFIG_PM
+	.suspend        = tvnet_host_suspend,
+	.resume         = tvnet_host_resume,
+#endif
 };
 
 module_pci_driver(tvnet_pci_driver);
