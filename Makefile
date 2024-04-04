@@ -1,7 +1,7 @@
 ### Makefile for the Create CanLab CLPE Client API ###
 
 TARGETS := all clean
-SUBDIRS := lib main stresstestmain
+SUBDIRS := lib main
 
 .PHONY: $(TARGETS) $(SUBDIRS)
 

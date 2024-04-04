@@ -54,8 +54,6 @@
 
 #define DMA_READ_DOORBELL_OFF		0x30
 #define DMA_READ_DOORBELL_OFF_RD_STOP	BIT(31)
-#define RD_DOORBELL_NUM_MASK		0x7
-#define RD_DOORBELL_NUM_SHIFT		0x0
 
 #define DMA_WRITE_INT_STATUS_OFF	0x4C
 #define DMA_WRITE_INT_MASK_OFF		0x54
@@ -385,7 +383,7 @@ static inline void tvnet_ivc_advance_wr(struct tvnet_counter *counter)
 	WRITE_ONCE(*counter->wr, READ_ONCE(*counter->wr) + 1);
 
 	/* BAR0 mmio address is wc mem, add mb to make sure cnts are updated */
-	mb();
+	smp_mb();
 }
 
 static inline void tvnet_ivc_advance_rd(struct tvnet_counter *counter)
@@ -393,12 +391,20 @@ static inline void tvnet_ivc_advance_rd(struct tvnet_counter *counter)
 	WRITE_ONCE(*counter->rd, READ_ONCE(*counter->rd) + 1);
 
 	/* BAR0 mmio address is wc mem, add mb to make sure cnts are updated */
-	mb();
+	smp_mb();
 }
 
-static inline void tvnet_ivc_advance_rd_count(struct tvnet_counter *counter, u32 count)
+static inline void tvnet_ivc_set_wr(struct tvnet_counter *counter, u32 val)
 {
-	WRITE_ONCE(*counter->rd, READ_ONCE(*counter->rd) + count);
+	WRITE_ONCE(*counter->wr, val);
+
+	/* BAR0 mmio address is wc mem, add mb to make sure cnts are updated */
+	smp_mb();
+}
+
+static inline void tvnet_ivc_set_rd(struct tvnet_counter *counter, u32 val)
+{
+	WRITE_ONCE(*counter->rd, val);
 
 	/* BAR0 mmio address is wc mem, add mb to make sure cnts are updated */
 	smp_mb();

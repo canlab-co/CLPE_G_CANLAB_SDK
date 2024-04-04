@@ -5,7 +5,7 @@
 #ifndef ClpeGlobalDef_h
 #define ClpeGlobalDef_h
 
-
+//UART
 /* Command ID */
 #define     SOCKET_PACKET_ID_PC_TO_XAVIER   (0x48)
 #define     SOCKET_PACKET_ID_XAVIER_TO_PC   (0x49)
@@ -35,8 +35,10 @@
 #define     CMD_ID_GET_EEPROM_DATA          (CMD_ID_UART_MAX+5)
 #define     CMD_ID_GET_MCU_ID               (CMD_ID_UART_MAX+6)     // no need it in pc
 #define     CMD_ID_REQ_RESYNC_TIME          (CMD_ID_UART_MAX+7)
+#define     CMD_ID_GET_XAVIER_STREAM_FORMAT (CMD_ID_UART_MAX+9)
 #endif
 
+//SOCKET
 /* Xavier to PC command message size */
 #define     SOCKET_CMD_TX_PAYLOAD_SIZE_NORMAL    (0)
 #define     SOCKET_CMD_TX_PAYLOAD_SIZE_MAX       (1)

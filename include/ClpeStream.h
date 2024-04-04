@@ -24,8 +24,8 @@
 #define	START_PORT	50000
 #define	END_PORT	50003
 #define	MAX_PORT	(END_PORT - START_PORT + 1)
-//#define AVAILALE_PORT   (MAX_PORT * 2)          // master & slave
-#define AVAILALE_PORT   (MAX_PORT)          // master & slave
+#define AVAILALE_PORT   (MAX_PORT * 2)          // master & slave
+//#define AVAILALE_PORT   (MAX_PORT)          // master & slave
 #define	PORT_NUM(_idx)				(START_PORT + (_idx))
 
 #define	DEST_IP_FROM		"192.168.7.8"

@@ -8,6 +8,3 @@ How to use canlab clpe api example.
  3. run canlab clpe api example.
 	- "$ cd main"
 	- "$ ./ClpeApi_Example_Main"
- 4. run canlab clpe api stress_test
-	- "$ cd stresstestmain
-	- "$ ./ClpeApi_StressTest_Main

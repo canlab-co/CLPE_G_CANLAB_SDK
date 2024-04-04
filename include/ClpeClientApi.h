@@ -23,7 +23,6 @@
 #define ERROR_GETSET_STOP			-7		// error - stop cam
 #define ERROR_INVALID_MCU_ID		-8		// error - invalid MCU ID
 #define ERROR_RESYNC_TIME		    -9		// error - time sync failed
-#define ERROR_INVALID_CAM_ID        -10     // error - invalid Camera ID
 
 #define ERROR_CONNECT_DRIVER		-1		// error - can not probe driver
 #define ERROR_CONNECT_NETWORK		-2		// error - can not find network
@@ -42,6 +41,7 @@
 #define PLAY_OFF					 0
 #define PLAY_ON						 1
 
+
 class ClpeClientApi : private ClpeSocket
 {
 public:
@@ -49,8 +49,8 @@ public:
 	virtual ~ClpeClientApi();
     
 	//---------------- clpe api func to use -------------------//
-	int Clpe_Connection(string password);
-	int Clpe_Connection();
+	int Clpe_Connection(string password, int isAttachedSlave);
+	int Clpe_Connection(int isAttachedSlave);
 
 	int Clpe_CheckPci();
 	int Clpe_CheckNetwork();
@@ -58,17 +58,19 @@ public:
 	int Clpe_CheckTimeSyncStatus();
     int Clpe_ReqResyncTime();
 
-	int Clpe_GetMicomVersion(unsigned char* version_master);
-	int Clpe_GetXavierVersion(unsigned char* version_master);
+	int Clpe_GetMicomVersion(unsigned char* version_master, unsigned char* version_slave);
+	int Clpe_GetXavierVersion(unsigned char* version_master, unsigned char* version_slave);
     int Clpe_GetSDKVersion(unsigned char* version);
 	int Clpe_GetCamStatus(int *status);
-    int Clpe_GetEepromData(int camId, unsigned char* eepromData);
+
 	int Clpe_SetXavierPowerOff();
 
-	int Clpe_StartStream(T_CB_APP cb_app, int use_cam_0, int use_cam_1, int use_cam_2, int use_cam_3, int display_on);
+	int Clpe_StartStream(T_CB_APP cb_app, int use_cam_0, int use_cam_1, int use_cam_2, int use_cam_3,
+		int use_cam_4, int use_cam_5, int use_cam_6, int use_cam_7, int display_on);
 	int Clpe_StopStream();
 	int Clpe_GetFrameAllCam(int *p_camera_id, unsigned char **p_buffer, unsigned int *p_size, struct timeval *pt_camera_timeStamp);
 	int Clpe_GetFrameOneCam(int camera_id, unsigned char **p_buffer, unsigned int *p_size, struct timeval *pt_camera_timeStamp);
+	int Clpe_SelectFormat(int format);
 	//---------------- clpe api func to use -------------------//
 private:	
    	bool Clpe_Send(unsigned char *s, int mcu_id);
