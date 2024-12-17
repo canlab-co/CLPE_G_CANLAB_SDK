@@ -23,6 +23,7 @@ int clpe_stopStream(void);
 int clpe_getFrameAnyCam(int *p_camera_id, unsigned char **p_buffer, unsigned int *p_size, struct timeval *pt_camera_timeStamp);
 int clpe_getFrameWithCamId(int camera_id, unsigned char **p_buffer, unsigned int *p_size, struct timeval *pt_camera_timeStamp);
 void clpe_setFormat(int format);
+void init_sensor_params(int sensor_id);
 #endif // #ifndef CANLAB_LOGGING_ENABLE
 
 #endif /* ClpeStreamApi_header */

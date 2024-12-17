@@ -35,6 +35,8 @@
 
 #define IMG_WIDTH_IMX390    1920//2048
 #define IMG_HEIGHT_IMX390   1080//1280
+#define IMG_WIDTH_AR0233    2048//2048
+#define IMG_HEIGHT_AR0233   1280//1280
 #define IMG_WIDTH_IMX490    2880
 #define IMG_HEIGHT_IMX490   1860
 
@@ -50,6 +52,12 @@
 //#define	UDP_LAST_BLOCK_SIZE		(5242880 - (UDP_MAX_BLOCK_NUM * UDP_BLOCK_SIZE))
 #define	UDP_LAST_BLOCK_SIZE		(UDP_FRAME_SIZE - (UDP_MAX_BLOCK_NUM * UDP_BLOCK_SIZE))
 /* ---------------------------------------------------------------------------- */
+
+//AR0233
+#define	UDP_FRAME_SIZE_AR0233			5242880	//  2048*1280*2
+#define	UDP_MAX_BLOCK_NUM_AR0233		81 // 82 - 1(Last)
+#define	UDP_LAST_BLOCK_SIZE_AR0233		(UDP_FRAME_SIZE_AR0233 - (UDP_MAX_BLOCK_NUM_AR0233 * UDP_BLOCK_SIZE))
+
 /* ---------------------------------------------------------------------------- */
 #define UDP_PORT_IDX_IMX490             10              // temporal value because IMX490 doesn't support in clpe_soc
 #define	UDP_FRAME_SIZE_IMX490	        (IMG_WIDTH_IMX490*IMG_HEIGHT_IMX490*2)
@@ -80,7 +88,7 @@ typedef struct {
 
 /* ---------------------------------------------------------------------------- */
 typedef struct {
-	xu8					block[UDP_LAST_BLOCK_SIZE];
+	xu8					block[UDP_LAST_BLOCK_SIZE_AR0233];
 } T_UDP_BLOCK_LAST;
 
 typedef struct {

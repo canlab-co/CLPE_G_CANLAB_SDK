@@ -36,6 +36,7 @@
 #define     CMD_ID_GET_MCU_ID               (CMD_ID_UART_MAX+6)     // no need it in pc
 #define     CMD_ID_REQ_RESYNC_TIME          (CMD_ID_UART_MAX+7)
 #define     CMD_ID_GET_XAVIER_STREAM_FORMAT (CMD_ID_UART_MAX+9)
+#define     CMD_ID_GET_SENSOR_ID	     (0x0F)
 #endif
 
 //SOCKET
