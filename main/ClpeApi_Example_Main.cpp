@@ -20,6 +20,9 @@
 #define CLPE_TEST_GET_FRAME_ALL_CAM		(CLPE_TEST_REQ_RESYNC_TIME+4)
 #define CLPE_TEST_SELECT_FORMAT		(CLPE_TEST_REQ_RESYNC_TIME+5)
 #define CLPE_TEST_MAX				(CLPE_TEST_REQ_RESYNC_TIME+6)
+#define CLPE_TEST_GET_SENSOR_ID		(0x12)
+
+static int caminfo = 0;
 
 //#define USE_NO_PASSWORD
 
@@ -80,6 +83,17 @@ int main()
 		 -6 - can not connect socket
 	**********************************/
 
+	clpe_api.Clpe_GetSensorInfo(&caminfo);
+
+	if(caminfo == 0)
+	{
+		printf("<::::: Result :::::> Camera Info : IMX390 (1920x1080) \n\n");
+	}
+	else if(caminfo == 1)
+	{
+		printf("<::::: Result :::::> Camera Info : AR0233 (2048x1280) \n\n");
+	}
+
 	if (ret == 0)
 	{
 		printf("Initial successed.\n\n");
@@ -113,6 +127,7 @@ int main()
 		printf("%d. Get frame one cam \n", CLPE_TEST_GET_FRAME_ONE_CAM);
 		printf("%d. Get frame all cam  \n", CLPE_TEST_GET_FRAME_ALL_CAM);
 		printf("%d. Select_Format  \n", CLPE_TEST_SELECT_FORMAT);
+		printf("%d. Get Sensor Info \n", CLPE_TEST_GET_SENSOR_ID);
 		printf("-----------------------------------------------------------------------------------\n");
 		printf("0. Exit \n");
 		printf("-----------------------------------------------------------------------------------\n");
@@ -129,6 +144,18 @@ int main()
 		{
 			printf("<::::: Error :::::> Invalid Command Number : %d \n\n", selectNum);
 			continue;
+		}
+
+		if(selectNum == CLPE_TEST_GET_SENSOR_ID)
+		{
+			if(caminfo == 0)
+			{
+				printf("<::::: Result :::::> Camera Info : IMX390 (1920x1080) \n\n");
+			}
+			else if(caminfo == 1)
+			{
+				printf("<::::: Result :::::> Camera Info : AR0233 (2048x1280) \n\n");
+			}
 		}
 
 		if (selectNum == CLPE_TEST_GET_CAM_STATUS) /* Get camera lock status of five(5) cameras */

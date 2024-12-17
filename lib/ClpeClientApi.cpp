@@ -1268,6 +1268,100 @@ int ClpeClientApi::Clpe_GetSDKVersion(unsigned char* version)
 }
 
 /********************************************************
+			  * Clpe_GetSensorInfo
+			  - Get Sensor Info
+*********************************************************/
+int ClpeClientApi::Clpe_GetSensorInfo(int* info)
+{
+	unsigned char *socketTx = (unsigned char*) malloc(SOCKET_CMD_TX_PACKET_SIZE_MAX);
+	unsigned char *socketRx = (unsigned char*) malloc(SOCKET_CMD_RX_PACKET_SIZE_MAX);
+
+	unsigned int checkSumTx = 0;
+	unsigned int checkSumRx = 0;
+	unsigned int checkSumRxData = 0;
+	unsigned int DataSum = 0;
+
+	bool ret = false;
+
+	int returnVal = 0;
+
+	int sendCmdCnt = 0;
+	
+	if(m_isAttachedSlave == 1)
+	{
+		sendCmdCnt = 2;
+	}
+	else
+	{
+		sendCmdCnt = 1;
+	}
+
+	for(int cpu_id = 0; cpu_id < sendCmdCnt; cpu_id++)
+	{
+		socketTx[0] = SOCKET_PACKET_ID_PC_TO_XAVIER;
+		socketTx[1] = CMD_ID_GET_SENSOR_ID;
+		socketTx[2] = 0x00;
+		checkSumTx = socketTx[0] + socketTx[1] + socketTx[2];
+		socketTx[3] = (unsigned char)((checkSumTx & 0x0000FF00) >> 8);
+		socketTx[4] = (unsigned char)(checkSumTx & 0x000000FF);
+
+		ret = Clpe_Send(socketTx, cpu_id);
+		if(!ret)
+		{
+			free(socketTx);
+			free(socketRx);
+			return ERROR_GETSET_COMMUNICATION;
+		}
+		ret = Clpe_Recv(socketRx, cpu_id);
+		if(!ret)
+		{
+			free(socketTx);
+			free(socketRx);
+			return ERROR_GETSET_COMMUNICATION;
+		}
+
+		for(int i = 0; i < SOCKET_CMD_RX_PAYLOAD_SIZE_NORMAL; i++)
+		{
+			DataSum += socketRx[3+i];
+		}
+
+		checkSumRx = socketRx[0] + socketRx[1] + socketRx[2] + DataSum;
+
+		checkSumRxData = (unsigned int)(socketRx[11] << 8 | socketRx[12]);
+
+		if(checkSumRx == checkSumRxData)
+		{
+			if(socketRx[3] == 0)
+			{
+				*info = socketRx[4];
+				returnVal = SUCCESSED;
+			}
+			if(socketRx[3] == 1)
+			{
+				returnVal = ERROR_GETSET_COMMAND;
+				break;
+			}
+			if(socketRx[3] == 3)
+			{
+				returnVal = ERROR_GETSET_COMMUNICATION;
+				break;
+			}
+		}
+		else
+		{
+			returnVal = ERROR_GETSET_CHECKSUM;
+			break;
+		}
+		DataSum = 0;
+	}
+	free(socketTx);
+	free(socketRx);
+
+	init_sensor_params(*info);
+
+	return returnVal;
+}
+/********************************************************
 			  * Clpe_GetCamStatus
 			  - Get Lock Status of Camera
 *********************************************************/

@@ -62,6 +62,7 @@ public:
 	int Clpe_GetXavierVersion(unsigned char* version_master, unsigned char* version_slave);
     int Clpe_GetSDKVersion(unsigned char* version);
 	int Clpe_GetCamStatus(int *status);
+	int Clpe_GetSensorInfo(int* info);
 
 	int Clpe_SetXavierPowerOff();
 

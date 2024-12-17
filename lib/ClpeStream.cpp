@@ -45,6 +45,16 @@ typedef struct jpeg_frame_info{
 	struct timeval jpeg_timeStamp;
 }t_jpeg_frame_info;
 
+// FOR IMX390 & AR0233
+#define IMX390 		0
+#define AR0233		1
+int img_width = 0;
+int img_height = 0;
+int udp_frame_size = 0;
+int udp_last_block_size = 0;
+int udp_last_lock_info_size = 0;
+int udp_max_block_num = 0;
+
 
 t_frame_info gt_frame_info[AVAILALE_PORT] = {0,};    // master & slave
 t_jpeg_frame_info gt_jpeg_frame_info[AVAILALE_PORT] = {0, };
@@ -53,6 +63,32 @@ pthread_t g_pthread;
 
 GstBus* appSinkBus;
 GstElement*		gAppSink;
+
+void init_sensor_params(int sensor_id)
+{
+	if(sensor_id == IMX390)
+	{
+		printf("\nSet IMX390\n");
+		img_width = IMG_WIDTH_IMX390;
+		img_height = IMG_HEIGHT_IMX390;
+		udp_frame_size = UDP_FRAME_SIZE;
+		udp_last_block_size = UDP_LAST_BLOCK_SIZE;
+		udp_max_block_num = UDP_MAX_BLOCK_NUM;
+	}
+	else if(sensor_id == AR0233)
+	{
+		printf("\nSet AR0233\n");
+		img_width = IMG_WIDTH_AR0233;
+		img_height = IMG_HEIGHT_AR0233;
+		udp_frame_size = UDP_FRAME_SIZE_AR0233;
+		udp_last_block_size = UDP_LAST_BLOCK_SIZE_AR0233;
+		udp_max_block_num = UDP_MAX_BLOCK_NUM_AR0233;
+	}
+	else
+	{
+	
+	}
+}
 
 void increase_seq(PortData* data, xu32 now_seq)
 {
@@ -71,37 +107,27 @@ void increase_seq(PortData* data, xu32 now_seq)
 	data->frame_max_seq = data->frame_now_seq + MAX_FRAME - 1;
 }
 
-int process_block_done(PortData* data)
+int process_block_done(PortData* data) // yun
 {
 	PortDataFrameX* frame = &data->frameX[data->frame_now_seq % MAX_FRAME];
 	xu32	now_seq = frame->seq;
-    xu32    ui32_udpFrameSize = 0;
-    xu32    ui32_udpMaxBlockNum = 0;
 
-    if(data->idx == UDP_PORT_IDX_IMX490) // in case of IMX490
-    {
-        ui32_udpFrameSize = UDP_FRAME_SIZE_IMX490;
-        ui32_udpMaxBlockNum = UDP_MAX_BLOCK_NUM_IMX490;
-    }
-    else
-    {
-        ui32_udpFrameSize = UDP_FRAME_SIZE;
-        ui32_udpMaxBlockNum = UDP_MAX_BLOCK_NUM;
-    }
-
-	//if(IS_BLOCK_DONE(frame))
-	if(frame->block_set_num == ui32_udpMaxBlockNum + 1)
+	if(frame->block_set_num == (xu32)(udp_max_block_num + 1))
 	{
 		// For STAT, Call Callback 
 		data->up_count++;
 		data->parent->up_count++;
 		if(data->idx != UDP_PORT_IDX_IMX490)
 		{
-			memcpy(frame->block.block[UDP_MAX_BLOCK_NUM], frame->block.last.block, UDP_LAST_BLOCK_SIZE);
+			memcpy(frame->block.block[udp_max_block_num], frame->block.last.block, udp_last_block_size);
 		}
 #ifdef CANLAB_LOGGING_ENABLE
-		if(data->cb_app(data->idx, frame->seq, frame->block.block[0], ui32_udpFrameSize, &frame->tv_frame
-					, data->dropped) < 0) {
+		if(data->cb_app(data->idx,
+				frame->seq,
+				frame->block.block[0],
+				udp_frame_size,
+				&frame->tv_frame,
+				data->dropped) < 0) {
 
 			g_main_loop_quit (data->parent->loop);
 			return -1;
@@ -114,18 +140,18 @@ int process_block_done(PortData* data)
 			return -1;
 		}
 #else
-        if(g_stop_signal == 1)
-        {
-            //g_main_loop_quit(data->parent->loop);
-            g_stop_signal = 0;
-            return -1;
-        }
-        else
-        {
-            data->cb_app(data->idx, frame->block.block[0], ui32_udpFrameSize, &frame->tv_frame);
-            intecept_frame(data->idx, frame->seq, frame->block.block[0], ui32_udpFrameSize, &frame->tv_frame);
-            
-        }
+		if(g_stop_signal == 1)
+		{
+		    //g_main_loop_quit(data->parent->loop);
+		    g_stop_signal = 0;
+		    return -1;
+		}
+		else
+		{
+		    data->cb_app(data->idx, frame->block.block[0], udp_frame_size, &frame->tv_frame);
+		    intecept_frame(data->idx, frame->seq, frame->block.block[0], udp_frame_size, &frame->tv_frame);
+		    
+		}
             
 #endif
 #endif // #ifdef CANLAB_LOGGING_ENABLE
@@ -135,9 +161,9 @@ int process_block_done(PortData* data)
 			GstBuffer* buffer;
 			GstMapInfo map;
 
-			buffer = gst_buffer_new_and_alloc (ui32_udpFrameSize);
+			buffer = gst_buffer_new_and_alloc (udp_frame_size);
 			gst_buffer_map (buffer, &map, GST_MAP_WRITE);
-			memcpy(map.data, &frame->block, ui32_udpFrameSize);
+			memcpy(map.data, &frame->block, udp_frame_size);
 			gst_buffer_unmap (buffer, &map);
 
 			struct timeval	tv_frame_pts;
@@ -161,170 +187,137 @@ int process_block_done(PortData* data)
 static GstFlowReturn
 on_new_sample_from_sink (GstElement* elt, PortData* data)
 {
- if(format == 0){
-	gettimeofday(&gt_jpeg_frame_info[data->idx].jpeg_timeStamp, NULL);
-
-	GstSample *sample;
-	GstBuffer *app_buffer, *buffer;
-	GstFlowReturn ret = GST_FLOW_OK;
-	GstMapInfo map;
-      
-        // get the sample from appsink 
-	sample = gst_app_sink_pull_sample (GST_APP_SINK (elt));
-	buffer = gst_sample_get_buffer (sample);	  	
-
-        // make a copy
-	app_buffer = gst_buffer_copy_deep (buffer);
-		  
-	gst_buffer_map (app_buffer, &map, GST_MAP_WRITE);
-	
-	data->cb_app(data->idx, (unsigned char *)map.data, (unsigned int)map.size, &gt_jpeg_frame_info[data->idx].jpeg_timeStamp);	
-	intecept_frame(data->idx, gt_jpeg_frame_info[data->idx].frame_seq, (unsigned char *)map.data, (unsigned int)map.size, &gt_jpeg_frame_info[data->idx].jpeg_timeStamp);
-	
-	//get source an push new buffer 
-	if(data->play){	
-		gst_app_src_push_buffer (GST_APP_SRC (data->up_appsrc), app_buffer);
-	}else{
-		//nothing to do
-	}
-
-	gst_sample_unref (sample);
-
-	gst_buffer_unmap (buffer, &map);
-
-	gt_jpeg_frame_info[data->idx].frame_seq++;
-
-	return ret;
-  }else{
-  	GstSample *sample;
-	GstBuffer *buffer;
-	GstFlowReturn ret = GST_FLOW_OK;
-	gsize			recv_len;
-	PortDataFrameX*	frame;
-    xu16    ui16_udpMaxBlockNum = 0;
-    xu32    ui32_udpLastBlockSize = 0;
-	xu32	fps = 0;
-
-    if(data->idx == UDP_PORT_IDX_IMX490) // in case of IMX490
-    {
-        ui16_udpMaxBlockNum = UDP_MAX_BLOCK_NUM_IMX490;
-        ui32_udpLastBlockSize = UDP_LAST_BLOCK_SIZE_IMX490;
-		fps = 25;
-    }
-    else
-    {
-        ui16_udpMaxBlockNum = UDP_MAX_BLOCK_NUM;
-        ui32_udpLastBlockSize = UDP_LAST_BLOCK_SIZE;
-		fps = 30;
-    }
-
-	sample = gst_app_sink_pull_sample (GST_APP_SINK (elt));
-
-
-	if(data->skip_count < ((ui16_udpMaxBlockNum+1) * fps * 1))		// skip 1 sec
+	if(format == 0)
 	{
-		data->skip_count++;
+		gettimeofday(&gt_jpeg_frame_info[data->idx].jpeg_timeStamp, NULL);
+
+		GstSample *sample;
+		GstBuffer *app_buffer, *buffer;
+		GstFlowReturn ret = GST_FLOW_OK;
+		GstMapInfo map;
+
+		// get the sample from appsink 
+		sample = gst_app_sink_pull_sample (GST_APP_SINK (elt));
+		buffer = gst_sample_get_buffer (sample);	  	
+
+		// make a copy
+		app_buffer = gst_buffer_copy_deep (buffer);
+			  
+		gst_buffer_map (app_buffer, &map, GST_MAP_WRITE);
+
+		data->cb_app(data->idx, (unsigned char *)map.data, (unsigned int)map.size, &gt_jpeg_frame_info[data->idx].jpeg_timeStamp);	
+		intecept_frame(data->idx, gt_jpeg_frame_info[data->idx].frame_seq, (unsigned char *)map.data, (unsigned int)map.size, &gt_jpeg_frame_info[data->idx].jpeg_timeStamp);
+
+		//get source an push new buffer 
+		if(data->play){	
+			gst_app_src_push_buffer (GST_APP_SRC (data->up_appsrc), app_buffer);
+		}else{
+			//nothing to do
+		}
+
 		gst_sample_unref (sample);
+		gst_buffer_unmap (buffer, &map);
+		gt_jpeg_frame_info[data->idx].frame_seq++;
+
 		return ret;
-	} 
-
-	buffer = gst_sample_get_buffer (sample);
-	recv_len = gst_buffer_extract(buffer, 0, data->recv, sizeof(*data->recv));
-
-	T_MSG_BLOCK_INFO*	info = (T_MSG_BLOCK_INFO*) &data->recv->info;
-	
-	DATA_LOCK(data);
-
-	if(data->do_check) {
-		if((
-					info->seq > data->frame_max_seq + 1
-					|| info->seq < data->frame_now_seq
-		   )) {
-			data->discard_low_seq++;
-
-			DATA_UNLOCK(data);
-
-			gst_sample_unref (sample);
-			return ret;
-		}
-
-#if 0
-		if((
-
-					info->seq == data->frame_max_seq + 1
-		   )) {
-			DATA_UNLOCK(data);
-			gst_sample_unref (sample);
-			return ret;
-		}
-#endif
 	}
+	else
+	{
+		GstSample *sample;
+		GstBuffer *buffer;
+		GstFlowReturn ret = GST_FLOW_OK;
+		gsize			recv_len;
+		PortDataFrameX*	frame;
+		xu32	fps = 30;
 
-	xu32 now = info->seq % MAX_FRAME;
-	frame = &data->frameX[now];
+		sample = gst_app_sink_pull_sample (GST_APP_SINK (elt));
 
-	// Valid Check
-	if((
-		info->block_id > ui16_udpMaxBlockNum
-		|| frame->block_set[info->block_id] // Already Exist ; Pre seq -> Drop, Future Seq -> ToDO
-		|| recv_len < (ui32_udpLastBlockSize + sizeof(T_MSG_BLOCK_INFO))
-		)) {
+		if(data->skip_count < ((udp_max_block_num + 1) * fps * 1))		// skip 1 sec
+		{
+			data->skip_count++;
+			gst_sample_unref (sample);
+			return ret;
+		} 
+
+		buffer = gst_sample_get_buffer (sample);
+		recv_len = gst_buffer_extract(buffer, 0, data->recv, sizeof(*data->recv));
+
+		T_MSG_BLOCK_INFO*	info = (T_MSG_BLOCK_INFO*) &data->recv->info;
+		
+		DATA_LOCK(data);
+
+		if(data->do_check)
+		{
+			if((info->seq > data->frame_max_seq + 1	|| info->seq < data->frame_now_seq))
+			{
+				data->discard_low_seq++;
+				DATA_UNLOCK(data);
+				gst_sample_unref (sample);
+				return ret;
+			}
+		}
+
+		xu32 now = info->seq % MAX_FRAME;
+		frame = &data->frameX[now];
+
+		// Valid Check
+		if((info->block_id > udp_max_block_num
+			|| frame->block_set[info->block_id] // Already Exist ; Pre seq -> Drop, Future Seq -> ToDO
+			|| recv_len < (udp_last_block_size + sizeof(T_MSG_BLOCK_INFO))))
+		{
+			DATA_UNLOCK(data);
+			gst_sample_unref (sample);
+			return ret;
+		}
+
+		// Block processing
+		if(info->block_id == udp_max_block_num) { // Last
+			 memcpy(frame->block.last.block, data->recv->block, udp_last_block_size);
+		} else {
+			 memcpy(frame->block.block[info->block_id],data->recv->block, UDP_BLOCK_SIZE);
+		}
+
+		frame->block_set[info->block_id] = TRUE;
+		frame->block_set_num ++;
+
+		if(frame->block_set_num == 1) { // First
+			frame->seq = info->seq;
+			frame->tv_frame = info->frame;
+		}
+		else if(frame->block_set_num == (xu32)(udp_max_block_num + 1))
+		{
+			if(! data->do_check ) {
+				data->do_check = 1;
+
+				// Totally Init
+				data->frame_now_seq = info->seq; // Error ???? frame->seq
+				data->frame_max_seq = data->frame_now_seq + MAX_FRAME - 1;
+				
+				// Totally 1st
+				data->frame_base_tv = info->frame;
+
+	#ifndef FIX_NOW_FRAME /* root.2021.0515 */
+				xu32 	idx;
+				for(idx = 0; idx < MAX_FRAME; idx ++) {
+					if(data->frameX[idx].seq < info->seq) {
+						memset(&data->frameX[idx], 0x00, sizeof(PortDataFrameX) - sizeof(T_UDP_BLOCK));
+					}
+				}
+	#endif /* FIX_NOW_FRAME  root.2021.0515 */
+			}
+			else
+			{
+				data->frame_now_seq = info->seq;
+				data->frame_max_seq = data->frame_now_seq + MAX_FRAME - 1;
+			}
+			process_block_done(data);
+		}
+
 		DATA_UNLOCK(data);
 		gst_sample_unref (sample);
+
 		return ret;
 	}
-
-	// Block processing
-	if(info->block_id == ui16_udpMaxBlockNum) { // Last
-		 memcpy(frame->block.last.block,			data->recv->block, ui32_udpLastBlockSize);
-	} else {
-		 memcpy(frame->block.block[info->block_id],data->recv->block, UDP_BLOCK_SIZE);
-	}
-
-	frame->block_set[info->block_id] = TRUE;
-	frame->block_set_num ++;
-
-	if(frame->block_set_num == 1) { // First
-		frame->seq = info->seq;
-		frame->tv_frame = info->frame;
-	}
-	// moved above
-	//else if(IS_BLOCK_DONE(frame))
-	else if(frame->block_set_num == (xu32)(ui16_udpMaxBlockNum + 1))
-	{
-		if(! data->do_check ) {
-			data->do_check = 1;
-
-			// Totally Init
-			data->frame_now_seq = info->seq; // Error ???? frame->seq
-			data->frame_max_seq = data->frame_now_seq + MAX_FRAME - 1;
-			
-			// Totally 1st
-			data->frame_base_tv = info->frame;
-
-#ifndef FIX_NOW_FRAME /* root.2021.0515 */
-			xu32 	idx;
-			for(idx = 0; idx < MAX_FRAME; idx ++) {
-				if(data->frameX[idx].seq < info->seq) {
-					memset(&data->frameX[idx], 0x00, sizeof(PortDataFrameX) - sizeof(T_UDP_BLOCK));
-				}
-			}
-#endif /* FIX_NOW_FRAME  root.2021.0515 */
-		}
-		else
-		{
-			data->frame_now_seq = info->seq;
-			data->frame_max_seq = data->frame_now_seq + MAX_FRAME - 1;
-		}
-
-		process_block_done(data);
-	}
-
-	DATA_UNLOCK(data);
-	gst_sample_unref (sample);
-
-	return ret;
-  }
 }
 
 gboolean on_sink_message_appsink (GstBus * bus, GstMessage * message, PortData* data)
@@ -377,23 +370,8 @@ int launch_port(PortData* data)
 	xc8		buff[4096];
 	xc8		name_app[32];
 	xc8		name_appsrc[32];
-	//xu16	port = START_PORT + data->idx;
-	xu16 port = 0;
-
-    xu32    image_width = 0;
-    xu32    image_height = 0;
+	xu16 		port = 0;
 	xc8		ip_address[32];
-
-    if(data->idx == UDP_PORT_IDX_IMX490) // in case of IMX490
-    {
-        image_width = IMG_WIDTH_IMX490;
-        image_height = IMG_HEIGHT_IMX490;
-    }
-    else
-    {
-        image_width = IMG_WIDTH_IMX390;
-        image_height = IMG_HEIGHT_IMX390;
-    }
 
 	if(data->idx < MAX_PORT)
 	{
@@ -408,25 +386,28 @@ int launch_port(PortData* data)
 
 	/* ========================================= SINK ========================================= */
 	snprintf(name_app, sizeof(name_app), "app_%u", data->idx);
-	if(format == 0){
-	snprintf(buff, sizeof(buff),
-			"udpsrc address=%s port=%u retrieve-sender-address=false buffer-size=%u "
-			" ! application/x-rtp, encoding-name=JPEG, payload=26 "
-			" ! queue max-size-time=5000000000 max-size-buffers=5000000000 max-size-bytes=5000000000 " 
-			" ! rtpjpegdepay ! appsink name=%s ",
-			ip_address, port,
-			UDP_GST_MAX_BUFFER_SIZE,
-			name_app
-			);
-	}else{
-	snprintf(buff, sizeof(buff),
-			"udpsrc address=%s port=%u retrieve-sender-address=false buffer-size=%u " 
-			" ! queue max-size-time=2000000000 max-size-buffers=2000000000 max-size-bytes=2000000000 " 
-			" ! appsink name=%s",
-			ip_address, port,
-			UDP_GST_MAX_BUFFER_SIZE,
-			name_app
-			);
+	if(format == 0)
+	{
+		snprintf(buff, sizeof(buff),
+				"udpsrc address=%s port=%u retrieve-sender-address=false buffer-size=%u "
+				" ! application/x-rtp, encoding-name=JPEG, payload=26, x-dimensions=\"%d,%d\" "
+				" ! queue max-size-time=5000000000 max-size-buffers=5000000000 max-size-bytes=5000000000 " 
+				" ! rtpjpegdepay ! appsink name=%s ",
+				ip_address, port,
+				UDP_GST_MAX_BUFFER_SIZE,
+				img_width, img_height,
+				name_app
+				);
+	}else
+	{
+		snprintf(buff, sizeof(buff),
+				"udpsrc address=%s port=%u retrieve-sender-address=false buffer-size=%u " 
+				" ! queue max-size-time=2000000000 max-size-buffers=2000000000 max-size-bytes=2000000000 " 
+				" ! appsink name=%s",
+				ip_address, port,
+				UDP_GST_MAX_BUFFER_SIZE,
+				name_app
+				);
 	}
 
 	data->appsink = gst_parse_launch (buff, NULL);
@@ -480,8 +461,8 @@ int launch_port(PortData* data)
 						" ! videoscale method=0 n-threads=9 ! video/x-raw, width=480, height=270 "
 						" ! videoconvert ! xvimagesink sync=false async=false",
 						name_appsrc,
-						image_width,
-						image_height
+						img_width,
+						img_height
 						);			
 			}
 			else
@@ -491,8 +472,8 @@ int launch_port(PortData* data)
 						" ! queue max-size-time=2000000000 max-size-buffers=2000000000 max-size-bytes=2000000000 " 
 						" ! videoconvert ! xvimagesink sync=false async=false",
 						name_appsrc,
-						image_width,
-						image_height
+						img_width,
+						img_height
 						);
 			}
 		}
@@ -509,45 +490,31 @@ int launch_port(PortData* data)
 		appSrcBus = gst_element_get_bus (data->appsrc);
 		data->appSrcBusWatchId[data->idx] = gst_bus_add_watch (appSrcBus, (GstBusFunc) on_source_message, data);
 		gst_object_unref (appSrcBus);
-
 		data->up_appsrc = gst_bin_get_by_name (GST_BIN(data->appsrc), name_appsrc);
 		g_object_set (data->up_appsrc, "format", GST_FORMAT_TIME, NULL);
 	}
-
 	return TRUE;
 }
 
 
 void *clpe_runStream(void *pArg)
 {
-    t_function_arg *pt_func_arg;
-    T_CB_APP cb_app;
-    int play;
+	t_function_arg *pt_func_arg;
+	T_CB_APP cb_app;
+	int play;
 	GstMessage *msg = NULL;
-    //int result = 0;
 
-    pt_func_arg = (t_function_arg *)pArg;
+	pt_func_arg = (t_function_arg *)pArg;
 
-    cb_app = pt_func_arg->callback_func;
-    play = pt_func_arg->display_on;
+	cb_app = pt_func_arg->callback_func;
+	play = pt_func_arg->display_on;
     
-	if(! cb_app) {
+	if(!cb_app)
+	{
 		fprintf(stderr, "T_CB_APP is NULL.\n");
-        //result = -1;
-        free(pt_func_arg);
-		//return (void *)&result;
+        	free(pt_func_arg);
 		return NULL;
 	}
-
-#if 0
-	char renice_cmd[ 128 ]; 
-	int pid = getpid(); 
-	sprintf (renice_cmd, "renice -20 %d > /dev/null" , pid); 
-	if(0 > system (renice_cmd)) {
-        result = -1;
-		return (void *)&result;
-	}
-#endif    
 
 	gst_init (NULL,NULL);
 	memset(&g_MainData, 0x00, sizeof(g_MainData));
@@ -562,48 +529,44 @@ void *clpe_runStream(void *pArg)
 	}
 
 	for(xu16 idx = 0; idx < AVAILALE_PORT; idx++) {
-        if(pt_func_arg->use_cam[idx] == 1)
-        {
+		if(pt_func_arg->use_cam[idx] == 1)
+		{
+	    		g_MainData.port[idx].parent = &g_MainData;
+	    		g_MainData.port[idx].cb_app = cb_app;
+	#if 0		
+			if(idx < 4)
+		    		g_MainData.port[idx].play = play;
+			else
+				g_MainData.port[idx].play = 0;
+	#else
+			g_MainData.port[idx].play = play;
+	#endif		
+	    		g_MainData.port[idx].idx = idx;
+	    		g_MainData.port[idx].seq = 0;
+	    		g_MainData.port[idx].recv = &g_recv[idx];
 
-    		g_MainData.port[idx].parent = &g_MainData;
-    		g_MainData.port[idx].cb_app = cb_app;
-#if 0		
-		if(idx < 4)
-	    		g_MainData.port[idx].play = play;
-		else
-			g_MainData.port[idx].play = 0;
-#else
-		g_MainData.port[idx].play = play;
-#endif		
-    		g_MainData.port[idx].idx = idx;
-    		g_MainData.port[idx].seq = 0;
-    		g_MainData.port[idx].recv = &g_recv[idx];
-
-    		g_MainData.port[idx].frame_now_seq = 0;
-    		g_MainData.port[idx].frame_max_seq = MAX_FRAME - 1;
-    		if(! launch_port(&g_MainData.port[idx]) ) {
-    			g_main_loop_unref (g_MainData.loop);
-    			//result = -2;
-    			free(pt_func_arg);
-        		return NULL;
-    		}
-        }
+	    		g_MainData.port[idx].frame_now_seq = 0;
+	    		g_MainData.port[idx].frame_max_seq = MAX_FRAME - 1;
+	    		if(! launch_port(&g_MainData.port[idx]) ) {
+	    			g_main_loop_unref (g_MainData.loop);
+	    			free(pt_func_arg);
+				return NULL;
+	    		}
+		}
 	}
 
 	for(xu16 idx = 0; idx < AVAILALE_PORT; idx++) {
-        if(pt_func_arg->use_cam[idx] == 1)
-        {
-    		PortData* data = &g_MainData.port[idx];
+		if(pt_func_arg->use_cam[idx] == 1)
+		{
+	    		PortData* data = &g_MainData.port[idx];
 
-    		if(data->appsrc) {
-    			gst_element_set_state (data->appsrc, GST_STATE_PLAYING);
-    		}
-    		gst_element_set_state (data->appsink, GST_STATE_PLAYING);
-			//gLastAppsink = data->appsrc;
-        }
+	    		if(data->appsrc) {
+	    			gst_element_set_state (data->appsrc, GST_STATE_PLAYING);
+	    		}
+	    		gst_element_set_state (data->appsink, GST_STATE_PLAYING);
+		}
 	}
 
-	//g_main_loop_run (g_MainData.loop);
 	msg = gst_bus_timed_pop_filtered(appSinkBus, GST_CLOCK_TIME_NONE, GstMessageType(GST_MESSAGE_EOS));
 	if(msg != NULL)
 	{
@@ -611,27 +574,24 @@ void *clpe_runStream(void *pArg)
 	}
 
 	for(xu16 idx = 0; idx < AVAILALE_PORT; idx++) {
-        if(pt_func_arg->use_cam[idx] == 1)
-        {
-        	PortData* data = &g_MainData.port[idx];
-			
-    		gst_element_set_state (g_MainData.port[idx].appsink, GST_STATE_NULL);
+		if(pt_func_arg->use_cam[idx] == 1)
+		{
+			PortData* data = &g_MainData.port[idx];
+				
+	    		gst_element_set_state (g_MainData.port[idx].appsink, GST_STATE_NULL);
 			if(data->appsrc) {
-	    		gst_element_set_state (g_MainData.port[idx].appsrc, GST_STATE_NULL);
+	    			gst_element_set_state (g_MainData.port[idx].appsrc, GST_STATE_NULL);
 			}
 			g_source_remove(data->appSinkBusWatchId[idx]);
-    		gst_object_unref (g_MainData.port[idx].appsink);
+    			gst_object_unref (g_MainData.port[idx].appsink);
 			if(data->appsrc) {
 				g_source_remove(data->appSrcBusWatchId[idx]);	
-	    		gst_object_unref (g_MainData.port[idx].appsrc);
+	    			gst_object_unref (g_MainData.port[idx].appsrc);
 			}
-        }
+		}
 	}
-
 	g_main_loop_unref (g_MainData.loop);
-
-    free(pt_func_arg);
-	//return (void *)&result;
+    	free(pt_func_arg);
 	return NULL;
 }
 
@@ -645,7 +605,6 @@ void intecept_frame(int camera_id, unsigned int cur_frame_seq, unsigned char* p_
 	    gt_frame_info[camera_id].size = size;
 	    gt_frame_info[camera_id].pt_camera_timeStamp = *pt_camera_timeStamp;
 	    gt_frame_info[camera_id].current_frame_seq = cur_frame_seq;
-	    
 	    g_cur_cam_id = camera_id;
 	    g_cur_frame_seq = cur_frame_seq;
 	    	  
@@ -658,7 +617,6 @@ void intecept_frame(int camera_id, unsigned int cur_frame_seq, unsigned char* p_
 	    gt_frame_info[camera_id].size = size;
 	    gt_frame_info[camera_id].pt_camera_timeStamp = *pt_camera_timeStamp;
 	    gt_frame_info[camera_id].current_frame_seq = cur_frame_seq;
-
 	    g_cur_cam_id = camera_id;
 	    g_cur_frame_seq = cur_frame_seq;
     }   
@@ -674,13 +632,13 @@ void clpe_setFormat(int getformat)
 int clpe_startStream(T_CB_APP cb_app, char use_cam_0, char use_cam_1, char use_cam_2, char use_cam_3, char use_cam_4, char use_cam_5, char use_cam_6, char use_cam_7, int display_on)
 {
 //    pthread_t p_thread;
-    int thread_id;
-    t_function_arg *pt_func_arg;
-    int result = ERROR_NONE;
+	int thread_id;
+	t_function_arg *pt_func_arg;
+	int result = ERROR_NONE;
 
-    pt_func_arg = (t_function_arg *)malloc(sizeof(t_function_arg));
-    pt_func_arg->callback_func = cb_app;
-    pt_func_arg->display_on = display_on;
+	pt_func_arg = (t_function_arg *)malloc(sizeof(t_function_arg));
+	pt_func_arg->callback_func = cb_app;
+	pt_func_arg->display_on = display_on;
 	pt_func_arg->use_cam[0] = use_cam_0;
 	pt_func_arg->use_cam[1] = use_cam_1;
 	pt_func_arg->use_cam[2] = use_cam_2;
@@ -690,34 +648,33 @@ int clpe_startStream(T_CB_APP cb_app, char use_cam_0, char use_cam_1, char use_c
 	pt_func_arg->use_cam[6] = use_cam_6;
 	pt_func_arg->use_cam[7] = use_cam_7;
 
-    thread_id = pthread_create(&g_pthread, NULL, clpe_runStream, (void *)(pt_func_arg));
+	thread_id = pthread_create(&g_pthread, NULL, clpe_runStream, (void *)(pt_func_arg));
 
-    if (thread_id < 0)
-    {
-        printf("Fail to create thread !!! \n");
-        result = ERROR_CREATE_TASK;
-    }
-    return result;
+	if (thread_id < 0)
+	{
+		printf("Fail to create thread !!! \n");
+		result = ERROR_CREATE_TASK;
+	}
+	return result;
 }
 
 int clpe_stopStream(void)
 {
-    int result = ERROR_NONE;
-    
-    g_stop_signal = 1;
+	int result = ERROR_NONE;
 
-    //g_main_loop_quit(g_MainData.loop);
-    gst_element_post_message(gAppSink, gst_message_new_eos(GST_OBJECT(gAppSink)));
+	g_stop_signal = 1;
 
-    pthread_join(g_pthread, NULL);
+	gst_element_post_message(gAppSink, gst_message_new_eos(GST_OBJECT(gAppSink)));
+
+	pthread_join(g_pthread, NULL);
 
 	memset(gt_frame_info, 0x00, sizeof(gt_frame_info));
 	g_cur_cam_id = 0;
-    g_last_cam_id = 0;
+	g_last_cam_id = 0;
 	g_cur_frame_seq = 0;
 	g_last_frame_seq = 0;
-	
-    return result;
+
+	return result;
 }
 
 int clpe_getFrameAnyCam(int *p_camera_id, unsigned char **p_buffer, unsigned int *p_size, struct timeval *pt_camera_timeStamp)
