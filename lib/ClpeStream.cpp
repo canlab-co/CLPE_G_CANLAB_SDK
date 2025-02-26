@@ -195,28 +195,30 @@ on_new_sample_from_sink (GstElement* elt, PortData* data)
 		GstBuffer *app_buffer, *buffer;
 		GstFlowReturn ret = GST_FLOW_OK;
 		GstMapInfo map;
-
+		      
 		// get the sample from appsink 
 		sample = gst_app_sink_pull_sample (GST_APP_SINK (elt));
-		buffer = gst_sample_get_buffer (sample);	  	
+		buffer = gst_sample_get_buffer (sample);	  	  
 
 		// make a copy
 		app_buffer = gst_buffer_copy_deep (buffer);
 			  
-		gst_buffer_map (app_buffer, &map, GST_MAP_WRITE);
-
-		data->cb_app(data->idx, (unsigned char *)map.data, (unsigned int)map.size, &gt_jpeg_frame_info[data->idx].jpeg_timeStamp);	
-		intecept_frame(data->idx, gt_jpeg_frame_info[data->idx].frame_seq, (unsigned char *)map.data, (unsigned int)map.size, &gt_jpeg_frame_info[data->idx].jpeg_timeStamp);
-
-		//get source an push new buffer 
-		if(data->play){	
-			gst_app_src_push_buffer (GST_APP_SRC (data->up_appsrc), app_buffer);
-		}else{
-			//nothing to do
+		if (gst_buffer_map (app_buffer, &map, GST_MAP_WRITE)) {
+		    data->cb_app(data->idx, (unsigned char *)map.data, (unsigned int)map.size, &gt_jpeg_frame_info[data->idx].jpeg_timeStamp);	
+		    intecept_frame(data->idx, gt_jpeg_frame_info[data->idx].frame_seq, (unsigned char *)map.data, (unsigned int)map.size, &gt_jpeg_frame_info[data->idx].jpeg_timeStamp);
+		    
+		    gst_buffer_unmap(app_buffer, &map); 
 		}
 
-		gst_sample_unref (sample);
-		gst_buffer_unmap (buffer, &map);
+		// get source an push new buffer 
+		if (data->play) {	
+		    gst_app_src_push_buffer(GST_APP_SRC (data->up_appsrc), app_buffer);
+		} else {
+		    gst_buffer_unref(app_buffer); 
+		}
+
+		gst_sample_unref(sample);
+
 		gt_jpeg_frame_info[data->idx].frame_seq++;
 
 		return ret;
